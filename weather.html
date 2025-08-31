@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Weather Now — Open‑Meteo (React)</title>
+  <!-- TailwindCSS via CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <meta name="description" content="Quickly check current weather for any city using Open‑Meteo. Built with React (no build step)." />
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen">
+  <div id="root"></div>
+
+  <!-- React & ReactDOM via CDN -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+
+  <script>
+    const { useState, useEffect, useMemo, useRef } = React;
+
+    // Weather code mapping from Open-Meteo documentation
+    const WEATHER_CODE = {
+      0: { label: "Clear sky", emoji: "☀️" },
+      1: { label: "Mainly clear", emoji: "🌤️" },
+      2: { label: "Partly cloudy", emoji: "⛅" },
+      3: { label: "Overcast", emoji: "☁️" },
+      45: { label: "Fog", emoji: "🌫️" },
+      48: { label: "Depositing rime fog", emoji: "🌫️" },
+      51: { label: "Light drizzle", emoji: "🌦️" },
+      53: { label: "Moderate drizzle", emoji: "🌦️" },
+      55: { label: "Dense drizzle", emoji: "🌧️" },
+      56: { label: "Light freezing drizzle", emoji: "🌧️" },
+      57: { label: "Dense freezing drizzle", emoji: "🌧️" },
+      61: { label: "Slight rain", emoji: "🌧️" },
+      63: { label: "Moderate rain", emoji: "🌧️" },
+      65: { label: "Heavy rain", emoji: "🌧️" },
+      66: { label: "Light freezing rain", emoji: "🌧️" },
+      67: { label: "Heavy freezing rain", emoji: "🌧️" },
+      71: { label: "Slight snow", emoji: "🌨️" },
+      73: { label: "Moderate snow", emoji: "🌨️" },
+      75: { label: "Heavy snow", emoji: "❄️" },
+      77: { label: "Snow grains", emoji: "❄️" },
+      80: { label: "Light showers", emoji: "🌦️" },
+      81: { label: "Moderate showers", emoji: "🌦️" },
+      82: { label: "Violent showers", emoji: "⛈️" },
+      85: { label: "Slight snow showers", emoji: "🌨️" },
+      86: { label: "Heavy snow showers", emoji: "❄️" },
+      95: { label: "Thunderstorm", emoji: "⛈️" },
+      96: { label: "Thunderstorm with slight hail", emoji: "⛈️" },
+      99: { label: "Thunderstorm with heavy hail", emoji: "⛈️" }
+    };
+
+    function useDebouncedState(initial, delay = 300) {
+      const [value, setValue] = useState(initial);
+      const [debounced, setDebounced] = useState(initial);
+      useEffect(() => {
+        const id = setTimeout(() => setDebounced(value), delay);
+        return () => clearTimeout(id);
+      }, [value, delay]);
+      return [value, setValue, debounced];
+    }
+
+    function CitySearch({ onSelect }) {
+      const [query, setQuery, debounced] = useDebouncedState("", 350);
+      const [results, setResults] = useState([]);
+      const [loading, setLoading] = useState(false);
+      const [error, setError] = useState("");
+      const acRef = useRef(null);
+
+      useEffect(() => {
+        if (!debounced || debounced.length < 2) {
+          setResults([]);
+          return;
+        }
+        (async () => {
+          try {
+            setLoading(true);
+            setError("");
+            if (acRef.current) acRef.current.abort();
+            acRef.current = new AbortController();
+            const url = new URL("https://geocoding-api.open-meteo.com/v1/search");
+            url.searchParams.set("name", debounced);
+            url.searchParams.set("count", "8");
+            url.searchParams.set("language", "en");
+            url.searchParams.set("format", "json");
+            const res = await fetch(url.toString(), { signal: acRef.current.signal });
+            if (!res.ok) throw new Error("Failed to search");
+            const data = await res.json();
+            setResults(data.results || []);
+          } catch (e) {
+            if (e.name !== "AbortError") setError("Could not fetch locations.");
+          } finally {
+            setLoading(false);
+          }
+        })();
+      }, [debounced]);
+
+      return (
+        React.createElement("div", { className: "w-full max-w-2xl mx-auto" },
+          React.createElement("label", { className: "block text-sm font-medium mb-2 text-slate-300" }, "Search city"),
+          React.createElement("input", {
+            value: query,
+            onChange: (e) => setQuery(e.target.value),
+            placeholder: "e.g., Hyderabad, London, Tokyo",
+            className: "w-full rounded-2xl bg-slate-900 border border-slate-700 px-4 py-3 outline-none focus:ring-2 focus:ring-sky-500",
+            "aria-label": "Search city"
+          }),
+          loading && React.createElement("div", { className: "mt-3 text-sm text-slate-400" }, "Searching..."),
+          error && React.createElement("div", { className: "mt-3 text-sm text-red-400" }, error),
+          results.length > 0 && React.createElement("ul", { className: "mt-3 divide-y divide-slate-800 rounded-2xl overflow-hidden border border-slate-800" },
+            results.map((r) => React.createElement("li", {
+              key: r.id,
+              className: "bg-slate-900/60 hover:bg-slate-900 cursor-pointer px-4 py-3",
+              onClick: () => {
+                onSelect(r);
+                setResults([]);
+                setQuery(r.name + (r.country ? ", " + r.country : ""));
+              }
+            },
+              React.createElement("div", { className: "font-medium" }, r.name, r.admin1 ? `, ${r.admin1}` : "", r.country ? `, ${r.country}` : ""),
+              React.createElement("div", { className: "text-xs text-slate-400" }, `Lat ${r.latitude.toFixed(2)}, Lon ${r.longitude.toFixed(2)}`)
+            ))
+          )
+        )
+      );
+    }
+
+    function CurrentCard({ place, data }) {
+      if (!data) return null;
+      const c = data.current;
+      const w = WEATHER_CODE[c.weather_code] || { label: "Unknown", emoji: "❓" };
+      return (
+        React.createElement("div", { className: "mt-6 grid gap-4 sm:grid-cols-2" },
+          React.createElement("div", { className: "rounded-2xl border border-slate-800 bg-gradient-to-b from-slate-900 to-slate-950 p-6 shadow-xl" },
+            React.createElement("div", { className: "text-sm text-slate-400 mb-1" }, place),
+            React.createElement("div", { className: "flex items-center gap-3" },
+              React.createElement("div", { className: "text-5xl" }, w.emoji),
+              React.createElement("div", null,
+                React.createElement("div", { className: "text-4xl font-semibold tracking-tight" }, `${c.temperature_2m}°C`),
+                React.createElement("div", { className: "text-slate-400" }, w.label, " • ", c.is_day ? "Day" : "Night")
+              )
+            )
+          ),
+          React.createElement("div", { className: "rounded-2xl border border-slate-800 bg-slate-900 p-6" },
+            React.createElement("div", { className: "grid grid-cols-2 gap-4 text-sm" },
+              React.createElement(Info, { label: "Feels like", value: c.apparent_temperature + "°C" }),
+              React.createElement(Info, { label: "Precipitation", value: c.precipitation + " mm" }),
+              React.createElement(Info, { label: "Wind Speed", value: c.wind_speed_10m + " km/h" }),
+              React.createElement(Info, { label: "Wind Dir", value: c.wind_direction_10m + "°" })
+            )
+          )
+        )
+      );
+    }
+
+    function Info({ label, value }) {
+      return React.createElement("div", { className: "rounded-xl bg-slate-800/50 px-4 py-3 border border-slate-700/50" },
+        React.createElement("div", { className: "text-slate-400 text-xs" }, label),
+        React.createElement("div", { className: "font-medium" }, value)
+      );
+    }
+
+    function App() {
+      const [selected, setSelected] = useState(null);
+      const [weather, setWeather] = useState(null);
+      const [loading, setLoading] = useState(false);
+      const [error, setError] = useState("");
+
+      useEffect(() => {
+        if (!selected) return;
+        (async () => {
+          try {
+            setLoading(true);
+            setError("");
+            const url = new URL("https://api.open-meteo.com/v1/forecast");
+            url.searchParams.set("latitude", selected.latitude);
+            url.searchParams.set("longitude", selected.longitude);
+            url.searchParams.set("current", "temperature_2m,apparent_temperature,is_day,precipitation,weather_code,wind_speed_10m,wind_direction_10m");
+            url.searchParams.set("timezone", "auto");
+            const res = await fetch(url.toString());
+            if (!res.ok) throw new Error("Failed to fetch weather");
+            const data = await res.json();
+            setWeather(data);
+          } catch (e) {
+            setError("Could not fetch weather for this location.");
+          } finally {
+            setLoading(false);
+          }
+        })();
+      }, [selected]);
+
+      const placeLabel = useMemo(() => {
+        if (!selected) return "";
+        const parts = [selected.name, selected.admin1, selected.country].filter(Boolean);
+        return parts.join(", ");
+      }, [selected]);
+
+      return (
+        React.createElement("main", { className: "max-w-3xl mx-auto px-4 py-10" },
+          React.createElement("h1", { className: "text-3xl sm:text-4xl font-bold tracking-tight" }, "Weather Now"),
+          React.createElement("p", { className: "text-slate-400 mt-1" }, "Instant current conditions for any city. Powered by Open‑Meteo."),
+          React.createElement("div", { className: "mt-6" },
+            React.createElement(CitySearch, { onSelect: setSelected }),
+            loading && React.createElement("div", { className: "mt-6 text-sm text-slate-400" }, "Loading current weather..."),
+            error && React.createElement("div", { className: "mt-6 text-sm text-red-400" }, error),
+            weather && React.createElement(CurrentCard, { place: placeLabel, data: weather })
+          ),
+          React.createElement("footer", { className: "mt-10 text-xs text-slate-500" },
+            "Built with React (no build step) + Tailwind. Data: Open‑Meteo."
+          )
+        )
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById("root"));
+    root.render(React.createElement(App));
+  </script>
+</body>
+</html>
